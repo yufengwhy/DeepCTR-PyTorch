@@ -63,8 +63,7 @@ class NFFM(BaseModel):
         dense_feature_columns = list(
             filter(lambda x: isinstance(x, DenseFeat), feature_columns)) if len(feature_columns) else []
 
-        return int(len(sparse_feature_columns) * embedding_size +\
-                len(sparse_feature_columns)* (len(sparse_feature_columns) - 1) /2 * embedding_size  +\
+        return int(len(sparse_feature_columns)* (len(sparse_feature_columns) - 1) /2 * embedding_size  +\
                sum(map(lambda x: x.dimension, dense_feature_columns)))
 
     def forward(self, X):
@@ -75,24 +74,31 @@ class NFFM(BaseModel):
 
         # sparse_embedding_list: [(batch_size, 1, emb_size), ...]
         # dense_value_list: [(batch_size, 1), ...]
-        sparse_embedding_list, dense_value_list = self.input_from_feature_columns(X, self.dnn_feature_columns,
+        _, dense_value_list = self.input_from_feature_columns(X, self.dnn_feature_columns,
                                                                                   self.embedding_dict)
+
+        # linear logic for memory part
+        linear_logit = self.linear_model(X)
 
         # second order  [(batch_size, 1,  emb_size), ...]
         spare_second_order_embedding_list = self.input_from_second_order_column(X, self.dnn_feature_columns,
                                                                                 self.second_order_embedding_dict)
-        # concat one order, second order and dense feature
-        total_feature = []
-        total_feature.extend(sparse_embedding_list)  # add one order
-        total_feature.extend(spare_second_order_embedding_list)  # add second order
-        total_feature = torch.cat(total_feature, dim=2).squeeze(1)  # (batch, n_f)
-        total_feature = torch.cat([total_feature, torch.cat(dense_value_list, dim=1)], dim=1)  # add dense feature
 
-        # print("total_feature_size: ", total_feature.size())
-        dnn_output = self.dnn(total_feature)
+        # dnn
+        dnn_input = combined_dnn_input(spare_second_order_embedding_list, dense_value_list)
+        dnn_output = self.dnn(dnn_input)
         dnn_logit = self.dnn_linear(dnn_output)
 
-        y_pred = self.out(dnn_logit)
+        if len(self.linear_feature_columns) > 0 and len(self.dnn_feature_columns) > 0:
+            final_logit = dnn_logit + linear_logit
+        elif len(self.linear_feature_columns) > 0:
+            final_logit = linear_logit
+        elif len(self.dnn_feature_columns) > 0:
+            final_logit = dnn_logit
+        else:
+            raise NotImplementedError
+
+        y_pred = self.out(final_logit)
 
         return y_pred
 
