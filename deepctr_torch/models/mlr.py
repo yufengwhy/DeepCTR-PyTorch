@@ -56,9 +56,17 @@ class MLR(BaseModel):
         self.feature_index = build_input_features(
             self.region_feature_columns + self.base_feature_columns + self.bias_feature_columns)
 
-        self.region_linear_model = Linear(self.region_feature_columns, self.feature_index, self.init_std, self.device)
-        self.base_linear_model = Linear(self.base_feature_columns, self.feature_index, self.init_std, self.device)
-        self.bias_linear_model = Linear(self.bias_feature_columns, self.feature_index, self.init_std, self.device)
+        self.region_linear_model = nn.ModuleList()
+        for i in range(self.region_num):
+            self.region_linear_model.append(Linear(self.region_feature_columns, self.feature_index, self.init_std, self.device))
+
+        self.base_linear_model = nn.ModuleList()
+        for i in range(self.region_num):
+            self.base_linear_model.append(Linear(self.base_feature_columns, self.feature_index, self.init_std, self.device))
+
+        if self.bias_feature_columns is not None and len(self.bias_feature_columns) > 0:
+            self.bias_linear_model = Linear(self.bias_feature_columns, self.feature_index, self.init_std, self.device)
+
         self.prediction_layer = PredictionLayer(task=task, use_bias=False)
 
         self.to(self.device)
@@ -69,9 +77,11 @@ class MLR(BaseModel):
             linear_model = self.region_linear_model
         elif type == 'base':
             linear_model = self.base_linear_model
-        else:
+        elif type == 'bias':
             linear_model = self.bias_linear_model
-        region_logit = torch.cat([linear_model(inputs) for i in range(region_number)], dim = 1)
+        else:
+            raise NotImplementedError
+        region_logit = torch.cat([linear_model[i](inputs) for i in range(region_number)], dim = 1)
         region_score = nn.Softmax(dim = 1)(region_logit)
         return region_score
 
@@ -80,9 +90,11 @@ class MLR(BaseModel):
             linear_model = self.region_linear_model
         elif type == 'base':
             linear_model = self.base_linear_model
-        else:
+        elif type == 'bias':
             linear_model = self.bias_linear_model
-        learner_score = self.prediction_layer(torch.cat([linear_model(inputs) for i in range(region_number)], dim = 1))
+        else:
+            raise NotImplementedError
+        learner_score = self.prediction_layer(torch.cat([linear_model[i](inputs) for i in range(region_number)], dim = 1))
         return learner_score
 
     def forward(self, X):
